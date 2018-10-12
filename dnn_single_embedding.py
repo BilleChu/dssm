@@ -9,7 +9,7 @@ import random
 import numpy as np
 import tensorflow as tf
 
-
+from keras.callbacks import Callback
 from keras import optimizers
 from keras.models import Model
 from keras.activations import sigmoid
@@ -26,6 +26,20 @@ config = tf.ConfigProto()
 config.gpu_options.per_process_gpu_memory_fraction = 0.6
 session = tf.Session(config=config)
 K.set_session(session)
+
+
+class roc_callback(Callback):
+    def __init__(self, val_data, label):
+        self.val_gen = val_data
+        self.label = label
+        self.val_reports = []
+
+    def on_epoch_end(self, epoch, logs={}):
+        y_pred = self.model.predict(self.val_gen, batch_size=128)
+        y_true = self.label
+        val_roc = roc_auc_score(y_true , y_pred)
+        print ("test auc: {}".format(val_roc))
+        self.val_reports.append(val_roc)
 
 class Feature(object):
     def __init__(self, length):
@@ -93,7 +107,7 @@ class Feature(object):
     def parse(self, line):
         slot_id_features = {}
         v = line.strip().split(" ")
-        label = int(v[0])
+        label = int(float(v[0]))
         for pair in v[1:]:
             v_pair = pair.split(":")
             if (len(v_pair) != 3):
@@ -108,19 +122,19 @@ class Feature(object):
 class Dnn(object):
     def __init__(self):
         self.user_slots = range(0, 39, 1)
-        self.embedding_dim = 8
+        self.embedding_dim = 9
         self.slot_seq_len = 1
         self.embedding_length = 1000000
 
     def tower(self, merge_layers):
         x = Dense(512, activation='relu', kernel_initializer='random_uniform')(merge_layers)
-        x = BatchNormalization()(x)
+        #x = BatchNormalization()(x)
         x = Dense(256, activation='relu', kernel_initializer='random_uniform')(x)
-        x = BatchNormalization()(x)
+        #x = BatchNormalization()(x)
         x = Dense(128, activation='relu', kernel_initializer='random_uniform')(x)
-        x = BatchNormalization()(x)
+        #x = BatchNormalization()(x)
         x = Dense(64, activation='relu', kernel_initializer='random_uniform')(x)
-        x = BatchNormalization()(x)
+        #x = BatchNormalization()(x)
         return x
 
     def build(self):
@@ -152,10 +166,11 @@ class Dnn(object):
 
     def train(self, features):
         print("-"*20)
+        self.auc = roc_callback(list(features.user_inputs_data_test.values()), features.test_label)
+        callback_list = [self.auc]
         self.model.fit(list(features.user_inputs_data_train.values()), \
-                       features.train_label, batch_size=16, epochs=10, \
-                       validation_data=(list(features.user_inputs_data_test.values()), \
-                       features.test_label))
+                       features.train_label, batch_size=128, epochs=10, \
+                       callbacks=callback_list)
 
 if '__main__' == __name__:
 
