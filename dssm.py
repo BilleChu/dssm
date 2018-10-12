@@ -27,6 +27,20 @@ config.gpu_options.per_process_gpu_memory_fraction = 0.6
 session = tf.Session(config=config)
 K.set_session(session)
 
+
+class roc_callback(Callback):
+    def __init__(self, val_data, label):
+        self.val_gen = val_data
+        self.label = label
+        self.val_reports = []
+
+    def on_epoch_end(self, epoch, logs={}):
+        y_pred = self.model.predict(self.val_gen, batch_size=128)
+        y_true = self.label
+        val_roc = roc_auc_score(y_true , y_pred)
+        print ("test auc: {}".format(val_roc))
+        self.val_reports.append(val_roc)
+
 class Feature(object):
     def __init__(self):
         self.slot_seq_len = 200
@@ -150,6 +164,7 @@ class Dssm(object):
             embedding_layers[slot_id] = Embedding(input_dim=self.slot2dim_map[slot_id] + 1,
                                                   output_dim=self.embedding_dim,
                                                   input_length=self.slot_seq_len,
+                                                  mask_zero=True,
                                                   trainable=True)
             user_embedding_original_layers[slot_id] = embedding_layers[slot_id](user_input_layers[slot_id])
             user_embedding_sum_layers[slot_id] = Lambda(lambda x:K.sum(x, axis=1), output_shape=lambda x:(x[0], x[2]))(user_embedding_original_layers[slot_id])
@@ -161,6 +176,7 @@ class Dssm(object):
             embedding_layers[slot_id] = Embedding(input_dim=self.slot2dim_map[slot_id] + 1,
                                                   output_dim=self.embedding_dim,
                                                   input_length=self.slot_seq_len,
+                                                  mask_zero=True,
                                                   trainable=True)
             doc_embedding_original_layers[slot_id] = embedding_layers[slot_id](doc_input_layers[slot_id])
             doc_embedding_sum_layers[slot_id] = Lambda(lambda x:K.sum(x, axis=1), output_shape=lambda x:(x[0], x[2]))(doc_embedding_original_layers[slot_id])
@@ -183,14 +199,17 @@ class Dssm(object):
 #        print (features.user_inputs_data_train)
         print("-"*20)
 #        print (features.doc_inputs_data_train)
+        self.auc = roc_callback(list(features.user_inputs_data_test.values()) + list(features.doc_inputs_data_test.values()), features.test_label)
+        callback_list = [self.auc]
 
         self.model.fit(list(features.user_inputs_data_train.values()) + list(features.doc_inputs_data_train.values()), \
                        features.train_label, batch_size=16, epochs=10, \
-                       validation_data=(list(features.user_inputs_data_test.values()) + list(features.doc_inputs_data_test.values()), \
-                       features.test_label))
+                       callbacks=callback_list, metrics=[auc])
 
 if '__main__' == __name__:
 
+    if (len(sys.argv) != 3):
+        print ("python dssm.py <sample.txt> <slot_dim.txt>")
     features = Feature()
     features.build_samples(sys.argv[1])
     dssm_model = Dssm()
